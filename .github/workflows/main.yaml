@@ -1,20 +1,28 @@
 name: Check homework
+
 on: [push]
+
 jobs:
   runner-job:
     if: ${{ github.repository_owner != 'ktsstudio' }}
     runs-on: ubuntu-latest
+
     env:
       IMAGE: 'ktshub/backend-summer-2021:task-6ff8c4a9-3f65-442b-b91c-1f5aaa9c3581'
       CONFIGPATH: /go/code/source/tests/config.yml
       PYTHONPATH: /go/code/source
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DATABASE: postgres
+      POSTGRES_PORT: 5432
+
     services:
       postgres:
-        image: postgres
+        image: postgres:15
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U ${{ env.POSTGRES_USER }}" 
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -22,20 +30,60 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v2
+      # 1️⃣ Чекаутим репозиторий
+      - uses: actions/checkout@v3
 
-      - name: set project_path
-        run: echo "PROJECTPATH=/home/runner/work/hw-backend-summer-2022-3-sql_querying/hw-backend-summer-2022-3-sql_querying" >> $GITHUB_ENV
+      # 2️⃣ Проверяем наличие demo.sql
+      - name: Check demo.sql
+        run: |
+          echo "Current directory: $(pwd)"
+          ls -R tests/data
 
-      - name: import db
-        run:  export PGPASSWORD="$POSTGRES_PASSWORD"; psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --d="$POSTGRES_DATABASE" < "$PROJECTPATH/tests/data/demo.sql"
+      # 3️⃣ Устанавливаем psql клиент
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      # 4️⃣ Ждем готовности PostgreSQL
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h localhost -p $POSTGRES_PORT -U $POSTGRES_USER && break
+            echo "Waiting for Postgres ($i)..."
+            sleep 2
+          done
+
+      # 5️⃣ Импортируем demo.sql в PostgreSQL
+      - name: Import demo.sql
+        run: |
+          PGPASSWORD=$POSTGRES_PASSWORD \
+            psql --host=localhost \
+                 --port=$POSTGRES_PORT \
+                 --username=$POSTGRES_USER \
+                 --dbname=$POSTGRES_DATABASE \
+                 -f tests/data/demo.sql
+
+      # 6️⃣ Запускаем ваш контейнер с main
+      - name: Run main in Docker
+        run: |
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_REF \
+            -e CONFIGPATH=${{ env.CONFIGPATH }} \
+            -e PYTHONPATH=${{ env.PYTHONPATH }} \
+            --network host \
+            --mount src="$(pwd)",target=/go/code/source,type=bind \
+            ${{ env.IMAGE }} \
+            -c "cd /go/code/source && mv build/main source && ls -lah && cd source && ./main"
+
+      # 7️⃣ Устанавливаем зависимости Python и запускаем pytest
+      - name: Run pytest on runner
         env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_USER: postgres
-          POSTGRES_DATABASE: postgres
-          POSTGRES_PASSWORD: postgres
-
-
-
-      - run: docker run --entrypoint /bin/bash -e GITHUB_REPOSITORY -e GITHUB_REF -e CONFIGPATH=${{ env.CONFIGPATH }} -e PYTHONPATH=${{ env.PYTHONPATH }} --network host --mount src="$(pwd)",target=/go/code/source,type=bind ${{ env.IMAGE }} -c "mv build/main source && ls -lah && cd source && ./main"
+          CONFIGPATH: ${{ env.CONFIGPATH }}
+          PYTHONPATH: ${{ env.PYTHONPATH }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -q tests/
