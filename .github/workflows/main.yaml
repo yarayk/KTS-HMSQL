@@ -1,16 +1,20 @@
 name: Check homework
+
 on: [push]
+
 jobs:
   runner-job:
     if: ${{ github.repository_owner != 'ktsstudio' }}
     runs-on: ubuntu-latest
+
     env:
       IMAGE: 'ktshub/backend-summer-2021:task-6ff8c4a9-3f65-442b-b91c-1f5aaa9c3581'
       CONFIGPATH: /go/code/source/tests/config.yml
       PYTHONPATH: /go/code/source
+
     services:
       postgres:
-        image: postgres
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
@@ -22,21 +26,41 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v2
+      # 1️⃣ Чекаутим репозиторий
+      - uses: actions/checkout@v3
 
-      - name: set project_path
-        run: echo "PROJECTPATH=/home/runner/work/hw-backend-summer-2022-3-sql_querying/hw-backend-summer-2022-3-sql_querying" >> $GITHUB_ENV
+      # 2️⃣ Проверяем, что demo.sql есть
+      - name: Check demo.sql
+        run: |
+          echo "Current directory: $(pwd)"
+          ls -R tests/data
 
-      - name: import db
-        run:  export PGPASSWORD="$POSTGRES_PASSWORD"; psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --d="$POSTGRES_DATABASE" < "$PROJECTPATH/tests/data/demo.sql"
+      # 3️⃣ Импортируем demo.sql в PostgreSQL
+      - name: Import demo.sql
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
           POSTGRES_USER: postgres
           POSTGRES_DATABASE: postgres
           POSTGRES_PASSWORD: postgres
+        run: |
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          psql --host="$POSTGRES_HOST" \
+               --port="$POSTGRES_PORT" \
+               --username="$POSTGRES_USER" \
+               --dbname="$POSTGRES_DATABASE" \
+               < tests/data/demo.sql
 
-
-
-      - run: docker run --entrypoint /bin/bash -e GITHUB_REPOSITORY -e GITHUB_REF -e CONFIGPATH=${{ env.CONFIGPATH }} -e PYTHONPATH=${{ env.PYTHONPATH }} --network host --mount src="$(pwd)",target=/go/code/source,type=bind ${{ env.IMAGE }} -c "mv build/main source && ls -lah && cd source && ./main"
-
+      # 4️⃣ Запускаем ваш контейнер с main
+      - name: Run main in Docker
+        run: |
+          docker run \
+            --entrypoint /bin/bash \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_REF \
+            -e CONFIGPATH=${{ env.CONFIGPATH }} \
+            -e PYTHONPATH=${{ env.PYTHONPATH }} \
+            --network host \
+            --mount src="$(pwd)",target=/go/code/source,type=bind \
+            ${{ env.IMAGE }} \
+            -c "mv build/main source && ls -lah && cd source && ./main"
