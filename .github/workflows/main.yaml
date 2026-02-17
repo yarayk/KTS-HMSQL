@@ -1,30 +1,20 @@
 name: Check homework
 on: [push]
-
 jobs:
   runner-job:
     if: ${{ github.repository_owner != 'ktsstudio' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     env:
       IMAGE: 'ktshub/backend-summer-2021:task-6ff8c4a9-3f65-442b-b91c-1f5aaa9c3581'
       CONFIGPATH: /go/code/source/tests/config.yml
       PYTHONPATH: /go/code/source
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-      POSTGRES_PORT: 5432
-
     services:
       postgres:
-        image: postgres:15
+        image: postgres
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_PASSWORD: postgres
         options: >-
-          --health-cmd "pg_isready -U ${{ env.POSTGRES_USER }}"
+          --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -32,78 +22,20 @@ jobs:
           - 5432:5432
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v2
 
-      - name: Set PROJECTPATH
-        run: echo "PROJECTPATH=$(pwd)" >> $GITHUB_ENV
+      - name: set project_path
+        run: echo "PROJECTPATH=/home/runner/work/hw-backend-summer-2022-3-sql_querying/hw-backend-summer-2022-3-sql_querying" >> $GITHUB_ENV
 
-      - name: Install psql client (for psql / pg_isready)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y postgresql-client
-
-      - name: Wait for Postgres to be ready
-        run: |
-          echo "Waiting for Postgres on localhost:${{ env.POSTGRES_PORT }}..."
-          for i in {1..30}; do
-            PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_isready -h localhost -p ${{ env.POSTGRES_PORT }} -U ${{ env.POSTGRES_USER }} && break
-            echo "Postgres not ready yet ($i)..."
-            sleep 2
-          done
-          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_isready -h localhost -p ${{ env.POSTGRES_PORT }} -U ${{ env.POSTGRES_USER }}
-
-      - name: Check demo.sql presence (debug)
-        run: |
-          echo "PROJECTPATH=$PROJECTPATH"
-          ls -la "$PROJECTPATH"
-          ls -la "$PROJECTPATH/tests"
-          ls -la "$PROJECTPATH/tests/data"
-
-      - name: Import demo.sql into Postgres
+      - name: import db
+        run:  export PGPASSWORD="$POSTGRES_PASSWORD"; psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --d="$POSTGRES_DATABASE" < "$PROJECTPATH/tests/data/demo.sql"
         env:
           POSTGRES_HOST: localhost
-          POSTGRES_PORT: ${{ env.POSTGRES_PORT }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DATABASE: ${{ env.POSTGRES_DB }}
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          PROJECTPATH: ${{ env.PROJECTPATH }}
-        run: |
-          # Подаём пароль inline, чтобы не было интерактивного prompt'а
-          PGPASSWORD="$POSTGRES_PASSWORD" \
-            psql --host="$POSTGRES_HOST" \
-                 --port="$POSTGRES_PORT" \
-                 --username="$POSTGRES_USER" \
-                 --dbname="$POSTGRES_DATABASE" \
-                 -f "$PROJECTPATH/tests/data/demo.sql"
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_DATABASE: postgres
+          POSTGRES_PASSWORD: postgres
 
-      - name: Run main in Docker (keeps original logic, mounts repo)
-        env:
-          CONFIGPATH: ${{ env.CONFIGPATH }}
-          PYTHONPATH: ${{ env.PYTHONPATH }}
-        run: |
-          # Запускаем контейнер, монтируем репозиторий в /go/code/source и запускаем main из корня /go/code/source
-          docker run --rm \
-            --entrypoint /bin/bash \
-            -e GITHUB_REPOSITORY \
-            -e GITHUB_REF \
-            -e CONFIGPATH=${{ env.CONFIGPATH }} \
-            -e PYTHONPATH=${{ env.PYTHONPATH }} \
-            --network host \
-            --mount src="$(pwd)",target=/go/code/source,type=bind \
-            ${{ env.IMAGE }} \
-            -c "cd /go/code/source && echo 'ls tests:' && ls -lah tests || true && echo 'Running ./main...' && ./main"
 
-      - name: Install Python deps and run pytest on runner
-        env:
-          CONFIGPATH: ${{ env.PROJECTPATH }}/tests/config.yml
-          PYTHONPATH: ${{ env.PYTHONPATH }}
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-          # Выводим конфиг для отладки
-          echo "Using CONFIGPATH=$CONFIGPATH"
-          ls -la "$(dirname "$CONFIGPATH")"
-          pytest -q tests/
+
+      - run: docker run --entrypoint /bin/bash -e GITHUB_REPOSITORY -e GITHUB_REF -e CONFIGPATH=${{ env.CONFIGPATH }} -e PYTHONPATH=${{ env.PYTHONPATH }} --network host --mount src="$(pwd)",target=/go/code/source,type=bind ${{ env.IMAGE }} -c "mv build/main source && ls -lah && cd source && ./main"
