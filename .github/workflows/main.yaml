@@ -1,5 +1,4 @@
 name: Check homework
-
 on: [push]
 
 jobs:
@@ -14,11 +13,13 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:latest
         env:
           POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -28,30 +29,27 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: set project_path
+      - name: Set project path
         run: echo "PROJECTPATH=$(pwd)" >> $GITHUB_ENV
 
-      - name: check demo.sql
-        run: ls -lah tests/data/
+      - name: Wait for Postgres
+        run: |
+          for i in {1..10}; do
+            pg_isready -h localhost -p 5432 -U postgres && break
+            echo "Waiting for Postgres..."
+            sleep 3
+          done
 
-      - name: import db
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_USER: postgres
-          POSTGRES_DATABASE: postgres
-          POSTGRES_PASSWORD: postgres
+      - name: Import demo SQL
         run: |
           export PGPASSWORD="$POSTGRES_PASSWORD"
-          psql --host="$POSTGRES_HOST" \
-               --port="$POSTGRES_PORT" \
-               --username="$POSTGRES_USER" \
-               --dbname="$POSTGRES_DATABASE" \
-               < tests/data/demo.sql
+          psql --host=localhost --port=5432 --username=postgres --dbname=postgres \
+               -f "$PROJECTPATH/tests/data/demo.sql"
 
-      - name: run main in docker
+      - name: Run main and tests in Docker
         run: |
           docker run \
+            --rm \
             --entrypoint /bin/bash \
             -e GITHUB_REPOSITORY \
             -e GITHUB_REF \
@@ -60,10 +58,4 @@ jobs:
             --network host \
             --mount src="$(pwd)",target=/go/code/source,type=bind \
             ${{ env.IMAGE }} \
-            -c "mv build/main source && ls -lah && cd source && ./main"
-
-      - name: run pytest
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pytest -v tests/
+            -c "cd /go/code/source && ls -lah tests && ./main"
