@@ -26,17 +26,15 @@ jobs:
           - 5432:5432
 
     steps:
-      # 1️⃣ Чекаутим репозиторий
       - uses: actions/checkout@v3
 
-      # 2️⃣ Проверяем, что demo.sql есть
-      - name: Check demo.sql
-        run: |
-          echo "Current directory: $(pwd)"
-          ls -R tests/data
+      - name: set project_path
+        run: echo "PROJECTPATH=$(pwd)" >> $GITHUB_ENV
 
-      # 3️⃣ Импортируем demo.sql в PostgreSQL
-      - name: Import demo.sql
+      - name: check demo.sql
+        run: ls -lah tests/data/
+
+      - name: import db
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
@@ -51,8 +49,7 @@ jobs:
                --dbname="$POSTGRES_DATABASE" \
                < tests/data/demo.sql
 
-      # 4️⃣ Запускаем ваш контейнер с main
-      - name: Run main in Docker
+      - name: run main in docker
         run: |
           docker run \
             --entrypoint /bin/bash \
@@ -64,3 +61,9 @@ jobs:
             --mount src="$(pwd)",target=/go/code/source,type=bind \
             ${{ env.IMAGE }} \
             -c "mv build/main source && ls -lah && cd source && ./main"
+
+      - name: run pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -v tests/
